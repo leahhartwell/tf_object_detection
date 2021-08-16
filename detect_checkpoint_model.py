@@ -1,6 +1,7 @@
 import argparse, cv2, os
 import numpy as np
 from PIL import Image
+from urllib.request import urlopen
 import load_objdetect as lod
 
 # commandline argument parser
@@ -62,3 +63,40 @@ elif args.input_type == "v":
         cap.release()
         output_file.release()
         cv2.destroyAllWindows()
+elif args.input_type == "s":
+    IP = args.input
+    stream = urlopen("http://" + IP + ":5000/video_feed")
+    bytes = b''
+    img_arr = []
+    detect_img_arr = []
+    while True:
+        bytes += stream.read(1024)
+        a = bytes.find(b'\xff\xd8')
+        b = bytes.find(b'\xff\xd9')
+        if a != -1 and b != -1:
+            jpg = bytes[a:b+2]
+            bytes = bytes[b+2:]
+            image_np = cv2.imdecode(np.fromstring(jpg, dtype=np.uint8), cv2.IMREAD_COLOR)
+            detect_img_np = image_np.copy()
+            img_arr.append(image_np)
+            image_tensor = lod.process_image_checkpoint(detect_img_np)
+            detections = detect_fn(image_tensor)
+            lod.vis_detect(detect_img_np,detections,category_index,args.boxes,args.threshold)
+            cv2.imshow('object detection', cv2.resize(detect_img_np,(640,480)))
+            height, width, layers = image_np.shape
+            size = (width,height)
+            detect_img_arr.append(detect_img_np)
+            if cv2.waitKey(25) & 0xFF == ord('q'):
+                break              
+    orig_file = cv2.VideoWriter(os.path.join(output_dir,"orig_" + IP + ".mp4"), -1, 15, size)
+    detect_file = cv2.VideoWriter(os.path.join(output_dir,"detect_" + IP + ".mp4"), -1, 15, size)
+    print("Starting Video Processing...")
+    for i in range(len(img_arr)):
+        orig_file.write(img_arr[i])
+    print("Finished Processing Original Video")
+    for i in range(len(detect_img_arr)):
+        detect_file.write(detect_img_arr[i])
+    print("Finished Processing Detection Video")
+    orig_file.release()
+    detect_file.release()
+    cv2.destroyAllWindows()         
